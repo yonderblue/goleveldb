@@ -432,7 +432,6 @@ func (t *tOps) remove(f *tFile) {
 // Closes the table ops instance. It will close all tables,
 // regadless still used or not.
 func (t *tOps) close() {
-	t.bpool.Close()
 	t.cache.Close()
 	if t.bcache != nil {
 		t.bcache.CloseWeak()
