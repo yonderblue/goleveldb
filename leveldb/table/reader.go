@@ -512,7 +512,7 @@ type Reader struct {
 	mu     sync.RWMutex
 	fd     storage.FileDesc
 	reader io.ReaderAt
-	cache  *cache.NamespaceGetter
+	cache  cache.NamespaceGetterr
 	err    error
 	bpool  *util.BufferPool
 	// Options
@@ -1022,7 +1022,7 @@ func (r *Reader) Release() {
 // The fi, cache and bpool is optional and can be nil.
 //
 // The returned table reader instance is safe for concurrent use.
-func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.NamespaceGetterr, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
 	if f == nil {
 		return nil, errors.New("leveldb/table: nil file")
 	}

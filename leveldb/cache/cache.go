@@ -58,6 +58,10 @@ func (g *NamespaceGetter) Get(key uint64, setFunc func() (size int, value Value)
 	return g.Cache.Get(g.NS, key, setFunc)
 }
 
+type NamespaceGetterr interface {
+	Get(key uint64, setFunc func() (size int, value Value)) *Handle
+}
+
 // The hash tables implementation is based on:
 // "Dynamic-Sized Nonblocking Hash Tables", by Yujie Liu,
 // Kunlong Zhang, and Michael Spear.
