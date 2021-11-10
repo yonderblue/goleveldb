@@ -512,7 +512,7 @@ type Reader struct {
 	mu     sync.RWMutex
 	fd     storage.FileDesc
 	reader io.ReaderAt
-	cache  *cache.NamespaceGetter
+	cache  cache.Getter
 	err    error
 	bpool  *util.BufferPool
 	// Options
@@ -620,7 +620,7 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool)
 	if r.cache != nil {
 		var (
 			err error
-			ch  *cache.Handle
+			ch  cache.GetterHandle
 		)
 		if fillCache {
 			ch = r.cache.Get(bh.offset, func() (size int, value cache.Value) {
@@ -680,7 +680,7 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 	if r.cache != nil {
 		var (
 			err error
-			ch  *cache.Handle
+			ch  cache.GetterHandle
 		)
 		if fillCache {
 			ch = r.cache.Get(bh.offset, func() (size int, value cache.Value) {
@@ -1025,7 +1025,7 @@ func (r *Reader) Release() {
 // The fi, cache and bpool is optional and can be nil.
 //
 // The returned table reader instance is safe for concurrent use.
-func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.Getter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
 	if f == nil {
 		return nil, errors.New("leveldb/table: nil file")
 	}

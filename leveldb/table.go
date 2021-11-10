@@ -344,7 +344,7 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 
 // Opens table. It returns a cache handle, which should
 // be released after use.
-func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
+func (t *tOps) open(f *tFile) (ch cache.GetterHandle, err error) {
 	ch = t.cache.Get(0, uint64(f.fd.Num), func() (size int, value cache.Value) {
 		var r storage.Reader
 		r, err = t.s.stor.Open(f.fd)
@@ -352,7 +352,7 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 			return 0, nil
 		}
 
-		var bcache *cache.NamespaceGetter
+		var bcache cache.Getter
 		if t.bcache != nil {
 			bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
 		}

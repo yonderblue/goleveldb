@@ -47,7 +47,7 @@ func set(c *Cache, ns, key uint64, value Value, charge int, relf func()) *Handle
 			return charge, releaserFunc{relf, value}
 		}
 		return charge, value
-	})
+	}).(*Handle)
 }
 
 type cacheMapTestParams struct {
@@ -98,7 +98,7 @@ func TestCacheMap(t *testing.T) {
 						o := &objects[key]
 						o.acquire()
 						return 1, o
-					})
+					}).(*Handle)
 					if v := h.Value().(*int32o); v != &objects[key] {
 						t.Fatalf("#%d invalid value: want=%p got=%p", ns, &objects[key], v)
 					}
@@ -132,7 +132,7 @@ func TestCacheMap(t *testing.T) {
 			for i := range handles {
 				handles[i] = c.Get(999999999, uint64(i), func() (int, Value) {
 					return 1, 1
-				})
+				}).(*Handle)
 			}
 			for _, h := range handles {
 				h.Release()

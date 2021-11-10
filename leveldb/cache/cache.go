@@ -15,6 +15,18 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
+type GetterHandle interface {
+	util.Releaser // Idempotent
+	Value() Value
+}
+
+type Getter interface {
+	// Release must be called when finished, which implies ref counting.
+	// If key not found, setFunc is used. Value can be a Releaser.
+	// Returns nil if setFunc is nil or returns nil.
+	Get(key uint64, setFunc func() (size int, value Value)) GetterHandle
+}
+
 // Cacher provides interface to implements a caching functionality.
 // An implementation must be safe for concurrent use.
 type Cacher interface {
@@ -54,7 +66,7 @@ type NamespaceGetter struct {
 }
 
 // Get simply calls Cache.Get() method.
-func (g *NamespaceGetter) Get(key uint64, setFunc func() (size int, value Value)) *Handle {
+func (g *NamespaceGetter) Get(key uint64, setFunc func() (size int, value Value)) GetterHandle {
 	return g.Cache.Get(g.NS, key, setFunc)
 }
 
@@ -364,7 +376,7 @@ func (r *Cache) SetCapacity(capacity int) {
 //
 // The returned 'cache handle' should be released after use by calling Release
 // method.
-func (r *Cache) Get(ns, key uint64, setFunc func() (size int, value Value)) *Handle {
+func (r *Cache) Get(ns, key uint64, setFunc func() (size int, value Value)) GetterHandle {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed {
