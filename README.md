@@ -1,3 +1,9 @@
+This is a fork of [goleveldb](https://github.com/syndtr/goleveldb).
+Grax only uses the `table` pkg along with associated packages like `iterator`.
+Changes have been made that will not work with the rest of the project!
+
+-----------
+
 This is an implementation of the [LevelDB key/value database](http:code.google.com/p/leveldb) in the [Go programming language](http:golang.org).
 
 [![Build Status](https://travis-ci.org/syndtr/goleveldb.png?branch=master)](https://travis-ci.org/syndtr/goleveldb)
