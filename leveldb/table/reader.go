@@ -562,6 +562,7 @@ func (r *Reader) fixErrCorruptedBH(bh blockHandle, err error) error {
 func (r *Reader) readRawBlock(bh blockHandle, verifyChecksum bool) ([]byte, error) {
 	data := r.bpool.Get(int(bh.length + blockTrailerLen))
 	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil && err != io.EOF {
+		r.bpool.Put(data)
 		return nil, err
 	}
 
@@ -656,11 +657,13 @@ func (r *Reader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
 	}
 	n := len(data)
 	if n < 5 {
+		r.bpool.Put(data)
 		return nil, r.newErrCorruptedBH(bh, "too short")
 	}
 	m := n - 5
 	oOffset := int(binary.LittleEndian.Uint32(data[m:]))
 	if oOffset > m {
+		r.bpool.Put(data)
 		return nil, r.newErrCorruptedBH(bh, "invalid data-offsets offset")
 	}
 	b := &filterBlock{
