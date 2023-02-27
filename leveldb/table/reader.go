@@ -710,6 +710,51 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 	return b, b, err
 }
 
+type footer struct {
+	data  []byte
+	bpool *util.BufferPool
+}
+
+func (f *footer) Release() {
+	f.bpool.Put(f.data)
+	f.bpool = nil
+	f.data = nil
+}
+
+// Caller must Release.
+func (r *Reader) readFooterCached(offset int64) (*footer, util.Releaser, error) {
+	if r.cache != nil {
+		ch := r.cache.Get(uint64(offset), func() (size int, value cache.Value) {
+			f, err := r.readFooter(offset)
+			if err != nil {
+				return 0, nil
+			}
+			return footerLen, f
+		})
+		if ch != nil {
+			f, ok := ch.Value().(*footer)
+			if !ok {
+				ch.Release()
+				return nil, nil, errors.New("leveldb/table: inconsistent footer type")
+			}
+			return f, ch, nil
+		}
+	}
+
+	f, err := r.readFooter(offset)
+	return f, f, err
+}
+
+// Caller must Release.
+func (r *Reader) readFooter(offset int64) (*footer, error) {
+	data := r.bpool.Get(footerLen)
+	if _, err := r.reader.ReadAt(data, int64(offset)); err != nil && err != io.EOF {
+		r.bpool.Put(data)
+		return nil, err
+	}
+	return &footer{data, r.bpool}, nil
+}
+
 func (r *Reader) getIndexBlock(fillCache bool) (b *block, rel util.Releaser, err error) {
 	if r.indexBlock == nil {
 		return r.readBlockCached(r.indexBH, true, fillCache)
@@ -1046,32 +1091,34 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.Gette
 	}
 
 	footerPos := size - footerLen
-	var footer [footerLen]byte
-	if _, err := r.reader.ReadAt(footer[:], footerPos); err != nil && err != io.EOF {
+	footer, footerRel, err := r.readFooterCached(footerPos)
+	if err != nil {
 		return nil, err
 	}
-	if string(footer[footerLen-len(magic):footerLen]) != magic {
+	defer footerRel.Release()
+
+	if string(footer.data[footerLen-len(magic):footerLen]) != magic {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad magic number")
 		return r, nil
 	}
 
 	var n int
 	// Decode the metaindex block handle.
-	r.metaBH, n = decodeBlockHandle(footer[:])
+	r.metaBH, n = decodeBlockHandle(footer.data)
 	if n == 0 {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad metaindex block handle")
 		return r, nil
 	}
 
 	// Decode the index block handle.
-	r.indexBH, n = decodeBlockHandle(footer[n:])
+	r.indexBH, n = decodeBlockHandle(footer.data[n:])
 	if n == 0 {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad index block handle")
 		return r, nil
 	}
 
 	// Read metaindex block.
-	metaBlock, err := r.readBlock(r.metaBH, true)
+	metaBlock, metaBlockRel, err := r.readBlockCached(r.metaBH, true, true)
 	if err != nil {
 		if errors.IsCorrupted(err) {
 			r.err = err
@@ -1079,6 +1126,7 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.Gette
 		}
 		return nil, err
 	}
+	defer metaBlockRel.Release()
 
 	// Set data end.
 	r.dataEnd = int64(r.metaBH.offset)
@@ -1113,7 +1161,6 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.Gette
 		}
 	}
 	metaIter.Release()
-	metaBlock.Release()
 
 	// Cache index and filter block locally, since we don't have global cache.
 	if cache == nil {
