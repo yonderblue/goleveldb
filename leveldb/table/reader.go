@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/golang/snappy"
@@ -521,22 +520,16 @@ type Reader struct {
 	filter         filter.Filter
 	verifyChecksum bool
 
-	dataEnd                   int64
-	metaBH, indexBH, filterBH blockHandle
-	indexBlock                *block
-	filterBlock               *filterBlock
+	dataEnd     int64
+	indexBH     blockHandle
+	indexBlock  *block
+	filterBlock *filterBlock
 }
 
 func (r *Reader) blockKind(bh blockHandle) string {
 	switch bh.offset {
-	case r.metaBH.offset:
-		return "meta-block"
 	case r.indexBH.offset:
 		return "index-block"
-	case r.filterBH.offset:
-		if r.filterBH.length > 0 {
-			return "filter-block"
-		}
 	}
 	return "data-block"
 }
@@ -747,11 +740,19 @@ func (r *Reader) readFooterCached(offset int64) (*footer, util.Releaser, error) 
 
 // Caller must Release.
 func (r *Reader) readFooter(offset int64) (*footer, error) {
-	data := r.bpool.Get(footerLen)
-	if _, err := r.reader.ReadAt(data, int64(offset)); err != nil && err != io.EOF {
+	const extraIndexLen = 384 * 1024 // 384 KiB to likely get the index cached
+
+	readOffset := offset - extraIndexLen
+	if readOffset < 0 {
+		readOffset = 0
+	}
+
+	data := r.bpool.Get(footerLen + int(offset-readOffset))
+	if _, err := r.reader.ReadAt(data, readOffset); err != nil && err != io.EOF {
 		r.bpool.Put(data)
 		return nil, err
 	}
+	data = data[len(data)-footerLen:]
 	return &footer{data, r.bpool}, nil
 }
 
@@ -760,13 +761,6 @@ func (r *Reader) getIndexBlock(fillCache bool) (b *block, rel util.Releaser, err
 		return r.readBlockCached(r.indexBH, true, fillCache)
 	}
 	return r.indexBlock, util.NoopReleaser{}, nil
-}
-
-func (r *Reader) getFilterBlock(fillCache bool) (*filterBlock, util.Releaser, error) {
-	if r.filterBlock == nil {
-		return r.readFilterBlockCached(r.filterBH, fillCache)
-	}
-	return r.filterBlock, util.NoopReleaser{}, nil
 }
 
 func (r *Reader) newBlockIter(b *block, bReleaser util.Releaser, slice *util.Range, inclLimit bool) *blockIter {
@@ -894,20 +888,6 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	if n == 0 {
 		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
 		return nil, nil, r.err
-	}
-
-	// The filter should only used for exact match.
-	if filtered && r.filter != nil {
-		filterBlock, frel, ferr := r.getFilterBlock(true)
-		if ferr == nil {
-			if !filterBlock.contains(r.filter, dataBH.offset, key) {
-				frel.Release()
-				return nil, nil, ErrNotFound
-			}
-			frel.Release()
-		} else if !errors.IsCorrupted(ferr) {
-			return nil, nil, ferr
-		}
 	}
 
 	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
@@ -1104,7 +1084,7 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.Gette
 
 	var n int
 	// Decode the metaindex block handle.
-	r.metaBH, n = decodeBlockHandle(footer.data)
+	metaBH, n := decodeBlockHandle(footer.data)
 	if n == 0 {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad metaindex block handle")
 		return r, nil
@@ -1117,73 +1097,8 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache cache.Gette
 		return r, nil
 	}
 
-	// Read metaindex block.
-	metaBlock, metaBlockRel, err := r.readBlockCached(r.metaBH, true, true)
-	if err != nil {
-		if errors.IsCorrupted(err) {
-			r.err = err
-			return r, nil
-		}
-		return nil, err
-	}
-	defer metaBlockRel.Release()
-
 	// Set data end.
-	r.dataEnd = int64(r.metaBH.offset)
-
-	// Read metaindex.
-	metaIter := r.newBlockIter(metaBlock, nil, nil, true)
-	for metaIter.Next() {
-		key := string(metaIter.Key())
-		if !strings.HasPrefix(key, "filter.") {
-			continue
-		}
-		fn := key[7:]
-		if f0 := o.GetFilter(); f0 != nil && f0.Name() == fn {
-			r.filter = f0
-		} else {
-			for _, f0 := range o.GetAltFilters() {
-				if f0.Name() == fn {
-					r.filter = f0
-					break
-				}
-			}
-		}
-		if r.filter != nil {
-			filterBH, n := decodeBlockHandle(metaIter.Value())
-			if n == 0 {
-				continue
-			}
-			r.filterBH = filterBH
-			// Update data end.
-			r.dataEnd = int64(filterBH.offset)
-			break
-		}
-	}
-	metaIter.Release()
-
-	// Cache index and filter block locally, since we don't have global cache.
-	if cache == nil {
-		r.indexBlock, err = r.readBlock(r.indexBH, true)
-		if err != nil {
-			if errors.IsCorrupted(err) {
-				r.err = err
-				return r, nil
-			}
-			return nil, err
-		}
-		if r.filter != nil {
-			r.filterBlock, err = r.readFilterBlock(r.filterBH)
-			if err != nil {
-				if !errors.IsCorrupted(err) {
-					return nil, err
-				}
-
-				// Don't use filter then.
-				r.filter = nil
-			}
-		}
-	}
+	r.dataEnd = int64(metaBH.offset)
 
 	return r, nil
 }

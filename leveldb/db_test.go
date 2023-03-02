@@ -1685,59 +1685,6 @@ func TestDB_ManualCompaction(t *testing.T) {
 	h.tablesPerLevel("0,0,1")
 }
 
-func TestDB_BloomFilter(t *testing.T) {
-	h := newDbHarnessWopt(t, &opt.Options{
-		DisableLargeBatchTransaction: true,
-		DisableBlockCache:            true,
-		Filter:                       filter.NewBloomFilter(10),
-	})
-	defer h.close()
-
-	key := func(i int) string {
-		return fmt.Sprintf("key%06d", i)
-	}
-
-	const n = 10000
-
-	// Populate multiple layers
-	for i := 0; i < n; i++ {
-		h.put(key(i), key(i))
-	}
-	h.compactMem()
-	h.compactRange("a", "z")
-	for i := 0; i < n; i += 100 {
-		h.put(key(i), key(i))
-	}
-	h.compactMem()
-
-	// Prevent auto compactions triggered by seeks
-	h.stor.Stall(testutil.ModeSync, storage.TypeTable)
-
-	// Lookup present keys. Should rarely read from small sstable.
-	h.stor.ResetCounter(testutil.ModeRead, storage.TypeTable)
-	for i := 0; i < n; i++ {
-		h.getVal(key(i), key(i))
-	}
-	cnt, _ := h.stor.Counter(testutil.ModeRead, storage.TypeTable)
-	t.Logf("lookup of %d present keys yield %d sstable I/O reads", n, cnt)
-	if min, max := n, n+2*n/100; cnt < min || cnt > max {
-		t.Errorf("num of sstable I/O reads of present keys not in range of %d - %d, got %d", min, max, cnt)
-	}
-
-	// Lookup missing keys. Should rarely read from either sstable.
-	h.stor.ResetCounter(testutil.ModeRead, storage.TypeTable)
-	for i := 0; i < n; i++ {
-		h.get(key(i)+".missing", false)
-	}
-	cnt, _ = h.stor.Counter(testutil.ModeRead, storage.TypeTable)
-	t.Logf("lookup of %d missing keys yield %d sstable I/O reads", n, cnt)
-	if max := 3 * n / 100; cnt > max {
-		t.Errorf("num of sstable I/O reads of missing keys was more than %d, got %d", max, cnt)
-	}
-
-	h.stor.Release(testutil.ModeSync, storage.TypeTable)
-}
-
 func TestDB_Concurrent(t *testing.T) {
 	const n, secs, maxkey = 4, 6, 1000
 	h := newDbHarness(t)
