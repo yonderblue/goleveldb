@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 
 	"github.com/golang/snappy"
 
@@ -20,7 +21,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-func sharedPrefixLen(a, b []byte) int {
+func sharedPrefixLenOld(a, b []byte) int {
 	i, n := 0, len(a)
 	if n > len(b) {
 		n = len(b)
@@ -29,6 +30,30 @@ func sharedPrefixLen(a, b []byte) int {
 		i++
 	}
 	return i
+}
+
+func sharedPrefixLen(a, b []byte) (n int) {
+	if len(b) < len(a) { // link below specifies the need
+		a, b = b, a
+	}
+
+	// below from the func matchLen at https://github.com/klauspost/compress/blob/master/zstd/zstd.go#L109-L128
+
+	for ; len(a) >= 8 && len(b) >= 8; a, b = a[8:], b[8:] {
+		diff := binary.LittleEndian.Uint64(a) ^ binary.LittleEndian.Uint64(b)
+		if diff != 0 {
+			return n + bits.TrailingZeros64(diff)>>3
+		}
+		n += 8
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			break
+		}
+		n++
+	}
+	return n
 }
 
 type blockWriter struct {
